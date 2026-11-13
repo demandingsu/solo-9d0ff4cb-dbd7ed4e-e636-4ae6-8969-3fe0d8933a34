@@ -83,6 +83,7 @@ def resolve_check(
     duplicates_skipped: int,
     detail_count: int,
     now: datetime,
+    listing_incomplete: bool = False,
 ) -> CheckResult:
     """Apply the business rules to a normalized announcement timeline."""
 
@@ -97,11 +98,23 @@ def resolve_check(
         )
 
     failed_details = [item for item in timeline if not item.fetch_ok]
-    if failed_details:
-        for item in failed_details:
+    blocked_details = [item for item in failed_details if item.blocked_redirect]
+    for item in failed_details:
+        if item.blocked_redirect:
+            result_issues.append(
+                f"详情页跨站跳转被阻止，公告保持原链接待核实：《{item.title}》"
+                f"（{item.url}）{item.error or ''}"
+            )
+        else:
             result_issues.append(
                 f"详情页抓取失败：《{item.title}》（{item.url}）{item.error or ''}"
             )
+
+    if listing_incomplete:
+        result_issues.append(
+            "公告列表未完整采集（存在被阻止的跨站跳转或分页抓取失败），"
+            "以下结论仅基于已采集公告，可能遗漏后续公告"
+        )
 
     if len(timeline) > 1 and any(item.publish_time is None for item in timeline):
         result_issues.append("存在缺少发布时间的相关公告，无法可靠排列公告先后关系")
@@ -163,6 +176,10 @@ def resolve_check(
     notes.append(f"去重后纳入 {len(timeline)} 条相关公告")
     if duplicates_skipped:
         notes.append(f"跨页或镜像重复公告已合并 {duplicates_skipped} 条")
+    if listing_incomplete:
+        notes.append("公告列表采集不完整，已展示的结论仅基于已采集公告")
+    if blocked_details:
+        notes.append(f"有 {len(blocked_details)} 条公告因跨站跳转被阻止，需人工核实")
     if ignored_after_cancel:
         notes.append(
             f"取消公告之后发现 {len(ignored_after_cancel)} 条普通更正；按规则不恢复招标"
@@ -208,5 +225,6 @@ def resolve_check(
         pages=pages,
         duplicates_skipped=duplicates_skipped,
         detail_count=detail_count,
+        listing_incomplete=listing_incomplete,
         ignored_after_cancel=ignored_after_cancel,
     )

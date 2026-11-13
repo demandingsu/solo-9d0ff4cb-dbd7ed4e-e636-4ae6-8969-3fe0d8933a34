@@ -31,7 +31,10 @@
           <p class="eyebrow">输入查询条件</p>
           <h2 id="search-title">项目与公告列表</h2>
         </div>
-        <a class="sample-site-link" href="http://localhost:8080/index.html" target="_blank" rel="noopener noreferrer">打开本地样本站点</a>
+        <div class="heading-links">
+          <a class="sample-site-link" href="http://localhost:8080/redirects.html" target="_blank" rel="noopener noreferrer">打开本地 302 跳转样例</a>
+          <a class="sample-site-link" href="http://localhost:8080/index.html" target="_blank" rel="noopener noreferrer">打开本地样本站点</a>
+        </div>
       </div>
 
       <form method="post" class="search-form">
@@ -56,6 +59,8 @@
         <code>GSB-2026-003</code><em>时间冲突</em>
         <code>GSB-2026-004</code><em>详情失败</em>
         <code>GSB-2026-005</code><em>已截止</em>
+        <code>GSB-2026-006</code><em>详情跳转阻断</em>
+        <code>GSB-2026-007</code><em>分页跳转阻断</em>
       </div>
     </section>
 
@@ -101,6 +106,9 @@
     {% if result.issues %}
     <section class="alert warning" role="alert">
       <strong>需要人工核实</strong>
+      {% if result.listing_incomplete %}
+      <p class="alert-lead">公告列表采集不完整：已展示目前已采集的公告，结论可能遗漏后续公告。</p>
+      {% endif %}
       <ul>
         {% for issue in result.issues %}
         <li>{{ issue }}</li>
@@ -138,26 +146,30 @@
           </thead>
           <tbody>
             {% for item in result.announcements %}
-            <tr class="kind-{{ item.kind }}{% if item.ignored_after_cancel %} ignored{% endif %}{% if not item.fetch_ok %} fetch-failed{% endif %}">
+            <tr class="kind-{{ item.kind }}{% if item.ignored_after_cancel %} ignored{% endif %}{% if not item.fetch_ok %} fetch-failed{% endif %}{% if item.blocked_redirect %} redirect-blocked{% endif %}">
               <td class="time-cell">{{ item.publish_time|dt }}</td>
               <td><span class="badge badge-{{ item.kind }}">{{ item.kind_label }}</span></td>
               <td>
                 <div class="notice-title">{{ item.title }}</div>
                 <div class="source-links">
-                  <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">公告来源</a>
+                  <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">公告来源（原链接）</a>
                   {% if item.found_on %}<a href="{{ item.found_on }}" target="_blank" rel="noopener noreferrer">发现列表页</a>{% endif %}
                 </div>
                 {% if item.source_note %}<div class="muted">{{ item.source_note }}</div>{% endif %}
                 {% if item.error %}<div class="error-text">{{ item.error }}</div>{% endif %}
               </td>
               <td>
-                {% if item.deadline %}
+                {% if item.blocked_redirect %}
+                  <span class="muted">未读取，待核实</span>
+                {% elif item.deadline %}
                   <strong>{{ item.deadline|dt }}</strong>
                   {% if item.deadline_text %}<div class="muted">{{ item.deadline_text }}</div>{% endif %}
                 {% else %}—{% endif %}
               </td>
               <td>
-                {% if not item.fetch_ok %}
+                {% if item.blocked_redirect %}
+                  <span class="role pending-role">跨站跳转已阻止，待核实</span>
+                {% elif not item.fetch_ok %}
                   <span class="role pending-role">详情失败，需核实</span>
                 {% elif item.ignored_after_cancel %}
                   <span class="role ignored-role">取消后普通更正，不恢复招标</span>
@@ -185,10 +197,11 @@
       <h2 id="rules-title">系统如何得出结论</h2>
       <ol>
         <li>从输入的列表页出发，仅跟踪同站分页链接，并抓取与项目编号匹配的详情页。</li>
+        <li>分页与详情均逐跳核对协议、主机与端口；302 跳往外站时在发出请求前阻断，相关公告保留原链接并标记“待核实”。</li>
         <li>同一公告在多个分页或镜像地址重复出现时，只保留一条进入时间链。</li>
         <li>按发布时间先后应用原公告与更正公告；最新有效截标时间作为当前截标时间。</li>
         <li>取消公告发布后，项目不再接受投标；其后的普通更正公告不会恢复招标。</li>
-        <li>相关详情抓取失败、同一时刻更正公告给出冲突截标时间，或关键时间缺失时，结论标记为“待核实”。</li>
+        <li>相关详情抓取失败、跳转被阻断、同一时刻更正公告给出冲突截标时间，或关键时间缺失时，结论标记为“待核实”。</li>
       </ol>
     </section>
   </main>

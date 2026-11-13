@@ -27,9 +27,20 @@ services:
   sample-site:
     image: tender-deadline-check:local
     build: .
-    command: ["python", "-m", "http.server", "8080", "--bind", "0.0.0.0", "--directory", "/app/sample_site"]
+    command:
+      - python
+      - sample_site_server.py
+    environment:
+      SAMPLE_SITE_HOST: 0.0.0.0
+      SAMPLE_SITE_PORT: "8080"
+      SAMPLE_SITE_DIR: /app/sample_site
+      SAMPLE_SITE_PUBLIC_URL: http://localhost:8080
+      SAMPLE_SITE_ALT_PORT: "8081"
+      SAMPLE_SITE_EXTRA_PORTS: "8081"
     ports:
       - "8080:8080"
+      # Alternate port used only by the cross-port redirect fixture.
+      - "8081:8081"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/index.html', timeout=3)\""]
       interval: 30s

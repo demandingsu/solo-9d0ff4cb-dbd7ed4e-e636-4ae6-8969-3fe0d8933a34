@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>离线演示样本站点 - 示例市政府采购网</title><link rel="stylesheet" href="/assets/site.css"></head>
-<body><header class="site-header"><div class="wrap"><div class="brand">示例市政府采购网</div><div class="subtitle">离线演示样本站点 · 公告分页与详情结构</div><nav class="topnav"><a href="/index.html">首页</a><a href="/notices/page-1.html">采购公告</a></nav></div></header><main class="wrap">
+<body><header class="site-header"><div class="wrap"><div class="brand">示例市政府采购网</div><div class="subtitle">离线演示样本站点 · 公告分页与详情结构</div><nav class="topnav"><a href="/index.html">首页</a><a href="/notices/page-1.html">采购公告</a><a href="/redirects.html">跳转样例</a></nav></div></header><main class="wrap">
 <section class="panel">
   <h1>离线演示样本站点</h1>
   <p>该站点模拟政府采购公告列表、分页和详情页，供“招标截标状态核对”应用离线抓取。</p>
@@ -11,6 +11,8 @@
     <div class="demo-card"><h2>待核实</h2><p>项目编号 <code>GSB-2026-003</code></p><p>同一时刻两条更正公告给出不同截标时间。</p></div>
     <div class="demo-card"><h2>待核实</h2><p>项目编号 <code>GSB-2026-004</code></p><p>相关更正公告详情页为 404，模拟抓取失败。</p></div>
     <div class="demo-card"><h2>已截止</h2><p>项目编号 <code>GSB-2026-005</code></p><p>截标时间已过。</p></div>
+    <div class="demo-card"><h2>跳转阻断</h2><p>项目编号 <code>GSB-2026-006</code></p><p>详情链接 302 跳往另一主机，核对应用阻断并标记“待核实”。</p></div>
+    <div class="demo-card"><h2>跳转阻断</h2><p>项目编号 <code>GSB-2026-007</code></p><p>分页链接 302 跳往另一端口，仅展示已采集公告并提示不完整。</p></div>
   </div>
-  <p style="margin-top:24px"><a href="/notices/page-1.html">进入公告列表第 1 页</a></p>
+  <p style="margin-top:24px"><a href="/notices/page-1.html">进入公告列表第 1 页</a> · <a href="/redirects.html">查看 302 跳转样例</a></p>
 </section></main><footer class="footer">本站点仅用于 Tender Check 离线演示，页面数据均为虚构。</footer></body></html>

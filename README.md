@@ -8,6 +8,18 @@
 4. 合并跨页或镜像重复公告；
 5. 输出“可投标 / 已截止 / 已取消 / 待核实”，并列明结论依据的标题、发布时间和来源链接。
 
+## 跳转安全（302 逐跳核对）
+
+分页和详情抓取都从**目录入口**取得协议、主机与端口（含默认端口归一化），并在跟随 302/303/307/308 时**逐跳**核对下一地址：
+
+- 站内跳转（协议、主机、端口完全一致）正常读取，最终地址作为公告来源；
+- 跨主机或跨端口的跳转在**发出请求前**即被阻断，绝不读取外站页面；
+- 详情跳转被阻断时，相关公告保留**原链接**、标记 `blocked_redirect`，结论为“待核实”，不会因外站取消公告而误报“已取消”；
+- 分页跳转被阻断时，保留已采集的分页与公告，提示“列表不完整”并继续基于已采集公告给出待核实结论；
+- 入口页本身发生跨站跳转时，直接返回错误，不读取任何外站内容。
+
+`SAMPLE_SITE_PUBLIC_URL` / `SAMPLE_SITE_INTERNAL_URL` 的浏览器地址与容器地址映射只用于实际发请求；跳转比较始终使用浏览器可见的“逻辑地址”，因此 Compose 内 `http://sample-site:8080` 与浏览器侧 `http://localhost:8080` 视为同一站点，而 `localhost` 与 `127.0.0.1`、`8080` 与 `8081` 视为不同站点。
+
 ## 快速启动（Docker Compose）
 
 ```bash
@@ -19,11 +31,12 @@ docker compose up --build
 - 核对应用：<http://localhost:5000>
 - 本地分页样本站点：<http://localhost:8080>
 - 样本列表页：<http://localhost:8080/notices/page-1.html>
+- 302 跳转样例页：<http://localhost:8080/redirects.html>
 
 Compose 包含两个服务：
 
 - `web`：Flask + requests + BeautifulSoup 核对应用；
-- `sample-site`：使用 Python 静态文件服务器提供的本地分页样本站点。
+- `sample-site`：基于 `sample_site_server.py` 的静态样本站点，额外提供固定 302 跳转路径，并同时监听 `8081` 端口用于跨端口样例。
 
 Web 容器会把浏览器可访问的 `http://localhost:8080` 自动映射为容器网络内的 `http://sample-site:8080`，因此页面中展示的仍然是宿主机可点击的来源链接。
 
@@ -38,8 +51,19 @@ Web 容器会把浏览器可访问的 `http://localhost:8080` 自动映射为容
 | `GSB-2026-003` | 同一发布时间两条更正给出不同截标时间 | 待核实 |
 | `GSB-2026-004` | 相关更正详情页返回 404 | 待核实 |
 | `GSB-2026-005` | 截标时间已过 | 已截止 |
+| `GSB-2026-006` | 详情链接 302 跳往另一主机（外站取消公告） | 待核实，阻断跳转，保留原链接 |
+| `GSB-2026-007` | “下一页”302 跳往另一端口 | 待核实，仅展示已采集公告并提示列表不完整 |
 
-> “可投标/已截止”会随运行时的系统日期变化；样本项目的取消、冲突和详情失败规则不变。
+> “可投标/已截止”会随运行时的系统日期变化；样本项目的取消、冲突、详情失败和跳转阻断规则不变。
+
+### 跳转样例操作路径
+
+| 场景 | 列表网址 | 浏览器入口 | 预期 |
+|---|---|---|---|
+| 站内相对跳转 | `http://localhost:8080/jump/same-site.html` | 同左 | 正常采集 3 个分页 |
+| 站内绝对跳转 | `http://localhost:8080/jump/same-site-absolute.html` | 同左 | 经公网/容器地址映射后仍正常采集 |
+| 详情跨主机 | `http://localhost:8080/notices/jump-demo.html` | `http://localhost:8080/notices/jump-demo.html` | 项目 `GSB-2026-006`：跑“待核实” |
+| 分页跨端口 | `http://localhost:8080/notices/redirect-demo.html` | 同左 | 项目 `GSB-2026-007`：展示第 1 页公告并提示不完整 |
 
 ## 样本站点页面结构
 
@@ -55,6 +79,10 @@ Web 容器会把浏览器可访问的 `http://localhost:8080` 自动映射为容
   - 标题位于 `h1`；
   - 项目编号、公告类型和发布日期位于 `.publish-meta`；
   - 正文包含“投标截止时间”“延期至”等常见表述。
+- 跳转样例：`sample_site/redirects.html` 汇总入口；固定 302 路径由 `sample_site_server.py` 提供：
+  - `/jump/same-site.html`、`/jump/same-site-absolute.html`（站内，允许）；
+  - `/jump/cross-host-cancel.html`、`/jump/cross-port-pagination.html`（跨站，阻断）；
+  - `notices/jump-demo.html`、`notices/redirect-demo.html` 及对应 `d-006`、`d-007` 详情页。
 
 抓取器并不只依赖这些固定 class：它还会识别常见的 `article/li/tr` 列表结构、分页文字、详情页 `meta` 时间、中文日期格式，以及“响应文件提交截止时间”“开标时间”等标签。
 
@@ -79,14 +107,22 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 
-# 终端 1：启动样本站点
-python -m http.server 8080 --directory sample_site
+# 终端 1：启动样本站点（含 302 跳转样例，同时监听 8080 与 8081）
+python sample_site_server.py
 
 # 终端 2：启动核对应用
 python app.py
 ```
 
-然后访问 <http://localhost:5000>。
+然后访问 <http://localhost:5000>，跳转样例见 <http://localhost:8080/redirects.html>。
+
+不带跳转样例时也可直接用标准库静态服务器：
+
+```bash
+python -m http.server 8080 --directory sample_site
+```
+
+此时 `/jump/*` 路径会返回 404（而非 302），仅影响跳转演示，不影响其他样本项目。
 
 ## 环境变量
 
@@ -97,6 +133,9 @@ python app.py
 | `DEMO_LIST_URL` | `http://localhost:8080/notices/page-1.html` | 表单默认列表网址 |
 | `SAMPLE_SITE_PUBLIC_URL` | 空 | 浏览器侧样本站点地址 |
 | `SAMPLE_SITE_INTERNAL_URL` | 空 | 容器网络内样本站点地址 |
+| `SAMPLE_SITE_PORT` | `8080` | 样本站点主监听端口 |
+| `SAMPLE_SITE_ALT_PORT` | `8081` | 跨端口跳转样例的目标端口 |
+| `SAMPLE_SITE_EXTRA_PORTS` | `8081` | 样本站点额外监听端口（逗号分隔） |
 | `MAX_LIST_PAGES` | `15` | 最多抓取的列表分页数 |
 | `MAX_DETAIL_PAGES` | `80` | 最多抓取的详情页数 |
 | `FLASK_SECRET_KEY` | 开发默认值 | Flask 密钥，生产环境应覆盖 |
@@ -109,10 +148,17 @@ python app.py
 python -m unittest discover -s tests
 ```
 
+`tests/test_redirect_safety.py` 需要 `requests`、`beautifulsoup4`（已在 `requirements.txt` 中）。它会在本地临时端口启动样本站点及其备用端口，并断言：
+
+- 站内相对/绝对跳转可正常跟随，Compose 的 `localhost` ↔ `sample-site` 映射不会误判为跨站；
+- 详情跨主机 302 在**发出外站请求前**被阻断，外站取消公告从未被读取，公告保留原链接并得出结论“待核实”；
+- 分页跨端口 302 被阻断后仍保留已采集公告，并标记 `listing_incomplete`；
+- 跨协议（http→https）跳转同样被阻断。
+
 ## 边界说明
 
 - 仅抓取静态 HTML，不执行 JavaScript；
-- 分页跟踪限制在同一站点（同一 scheme、主机和端口）；
+- 分页跟踪限制在同一站点（同一 scheme、主机和端口）；302 跳转逐跳核对，跨站跳转在发出请求前阻断；
 - 单个 HTML 页面默认最大 5 MB；
 - 详情页请求超时后会将相关项目标记为“待核实”，不会猜测结论；
 - 抓取结果用于辅助核对，正式投标前仍应以采购人或代理机构的书面确认为准。

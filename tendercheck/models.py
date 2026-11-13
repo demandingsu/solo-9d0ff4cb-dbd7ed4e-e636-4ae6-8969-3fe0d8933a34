@@ -43,6 +43,7 @@ class Announcement:
     deadline_text: Optional[str] = None
     found_on: Optional[str] = None
     fetch_ok: bool = True
+    blocked_redirect: bool = False
     error: Optional[str] = None
     source_note: Optional[str] = None
     ignored_after_cancel: bool = False
@@ -78,6 +79,7 @@ class CheckResult:
     pages: list[str] = field(default_factory=list)
     duplicates_skipped: int = 0
     detail_count: int = 0
+    listing_incomplete: bool = False
     ignored_after_cancel: list[Announcement] = field(default_factory=list)
 
     @property

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>本地跳转样例 - 示例市政府采购网</title><link rel="stylesheet" href="/assets/site.css"></head>
+<body><header class="site-header"><div class="wrap"><div class="brand">示例市政府采购网</div><div class="subtitle">离线演示样本站点 · 302 跳转样例</div><nav class="topnav"><a href="/index.html">首页</a><a href="/notices/page-1.html">采购公告</a><a href="/redirects.html">跳转样例</a></nav></div></header><main class="wrap">
+<section class="panel">
+  <h1>302 跳转样例（可在浏览器直接点击）</h1>
+  <p>本页列出样本站点提供的固定跳转路径，用于核对应用“逐跳核对协议、主机与端口”的行为。点击链接时浏览器会跟随 302；核对应用会在发出跨站请求前阻断。</p>
+
+  <div class="demo-grid">
+    <div class="demo-card">
+      <h2>1. 站内相对跳转（允许）</h2>
+      <p><code>/jump/same-site.html</code> 302 到同一站点的公告列表第 1 页。</p>
+      <p><a href="/jump/same-site.html">在浏览器打开</a></p>
+      <p>在核对应用中把列表网址填为：<br><code>http://localhost:8080/jump/same-site.html</code></p>
+    </div>
+    <div class="demo-card">
+      <h2>2. 站内绝对地址跳转（允许）</h2>
+      <p><code>/jump/same-site-absolute.html</code> 302 到 <code>SAMPLE_SITE_PUBLIC_URL</code> 下的同一列表页（未配置时使用相对地址）。</p>
+      <p><a href="/jump/same-site-absolute.html">在浏览器打开</a></p>
+      <p>用于验证容器内外地址映射，例如公网地址 <code>http://localhost:8080</code> 映射到容器内 <code>http://sample-site:8080</code>。</p>
+    </div>
+    <div class="demo-card">
+      <h2>3. 跨主机跳转（阻断）</h2>
+      <p><code>/jump/cross-host-cancel.html</code> 302 到另一主机名下的“取消公告”详情页（同一端口）。</p>
+      <p><a href="/jump/cross-host-cancel.html">在浏览器打开</a></p>
+      <p>核对应用会阻止该跳转，不再读取外站取消公告，公告保留原链接并标记“待核实”。</p>
+    </div>
+    <div class="demo-card">
+      <h2>4. 跨端口跳转（阻断）</h2>
+      <p><code>/jump/cross-port-pagination.html</code> 302 到同一主机的另一个端口（默认 <code>8081</code>）。</p>
+      <p><a href="/jump/cross-port-pagination.html">在浏览器打开</a>（需同时启动 8081 端口的备用样本站点）</p>
+      <p>核对应用会阻止该分页跳转，仅展示已采集公告并提示列表不完整。</p>
+    </div>
+  </div>
+
+  <h2>对应的样本项目</h2>
+  <ul>
+    <li><a href="/notices/jump-demo.html">GSB-2026-006 跳转样例列表</a>：详情链接被 302 跳往另一主机，预期“待核实”，不得显示“已取消”。</li>
+    <li><a href="/notices/redirect-demo.html">GSB-2026-007 分页跳转样例列表</a>：下一页被 302 跳往另一端口，预期展示第 1 页公告并提示列表不完整。</li>
+  </ul>
+
+  <h2>在核对应用中操作</h2>
+  <ol>
+    <li>项目编号填 <code>GSB-2026-006</code>，列表网址填 <code>http://localhost:8080/notices/jump-demo.html</code>；</li>
+    <li>项目编号填 <code>GSB-2026-007</code>，列表网址填 <code>http://localhost:8080/notices/redirect-demo.html</code>。</li>
+  </ol>
+</section></main><footer class="footer">本站点仅用于 Tender Check 离线演示，页面数据均为虚构。</footer></body></html>

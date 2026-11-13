@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
@@ -44,8 +45,21 @@ class FetchError(RuntimeError):
     pass
 
 
+class BlockedRedirectError(FetchError):
+    """A redirect was rejected before the cross-origin request was sent."""
+
+    def __init__(self, message: str, *, source_url: str, target_url: str) -> None:
+        super().__init__(message)
+        self.source_url = source_url
+        self.target_url = target_url
+
+
 class ListFetchError(RuntimeError):
     pass
+
+
+MAX_REDIRECTS = 10
+_REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
 @dataclass
@@ -226,16 +240,56 @@ class HttpFetcher:
             }
         )
 
-    def fetch(self, logical_url: str) -> FetchedPage:
+    def fetch(
+        self,
+        logical_url: str,
+        *,
+        origin: Optional[tuple[str, str]] = None,
+    ) -> FetchedPage:
+        """Fetch a page, validating every redirect hop against ``origin``.
+
+        Redirects are followed manually. The ``Location`` target is compared
+        with the entry page's scheme/host/port *before* the next request is
+        sent, so a cross-host or cross-port 302 is never requested.
+        """
+
         fetch_url = self.mapper.to_fetch_url(logical_url)
-        try:
-            response = self.session.get(
-                fetch_url,
-                timeout=self.timeout,
-                stream=True,
-                allow_redirects=True,
-            )
+        start_origin = origin or url_origin(self.mapper.to_logical_url(fetch_url))
+        current_url = fetch_url
+
+        for _ in range(MAX_REDIRECTS + 1):
+            try:
+                response = self.session.get(
+                    current_url,
+                    timeout=self.timeout,
+                    stream=True,
+                    allow_redirects=False,
+                )
+            except requests.Timeout as exc:
+                raise FetchError("请求超时") from exc
+            except requests.ConnectionError as exc:
+                raise FetchError("无法连接目标站点") from exc
+            except requests.RequestException as exc:
+                raise FetchError(str(exc)) from exc
+
             with response:
+                location = response.headers.get("Location")
+                if response.status_code in _REDIRECT_STATUSES:
+                    if not location:
+                        raise FetchError("重定向响应缺少 Location 头")
+                    logical_target = self.mapper.to_logical_url(
+                        urljoin(self.mapper.to_logical_url(current_url), location)
+                    )
+                    if not same_site(logical_target, start_origin):
+                        raise BlockedRedirectError(
+                            f"跳转目标不在同一站点（{url_origin(logical_target)[0]}://"
+                            f"{url_origin(logical_target)[1]}），已阻止跳转",
+                            source_url=self.mapper.to_logical_url(current_url),
+                            target_url=logical_target,
+                        )
+                    current_url = self.mapper.to_fetch_url(logical_target)
+                    continue
+
                 try:
                     response.raise_for_status()
                 except requests.HTTPError as exc:
@@ -264,18 +318,12 @@ class HttpFetcher:
                     chunks.append(chunk)
                 raw = b"".join(chunks)
                 final_url = self.mapper.to_logical_url(response.url)
-        except FetchError:
-            raise
-        except requests.Timeout as exc:
-            raise FetchError("请求超时") from exc
-        except requests.ConnectionError as exc:
-            raise FetchError("无法连接目标站点") from exc
-        except requests.RequestException as exc:
-            raise FetchError(str(exc)) from exc
 
-        # BeautifulSoup handles common Chinese encodings declared in meta tags.
-        soup = BeautifulSoup(raw, "html.parser")
-        return FetchedPage(url=final_url, soup=soup)
+            # BeautifulSoup handles common Chinese encodings declared in meta tags.
+            soup = BeautifulSoup(raw, "html.parser")
+            return FetchedPage(url=final_url, soup=soup)
+
+        raise FetchError(f"重定向次数超过上限 {MAX_REDIRECTS}")
 
     def close(self) -> None:
         self.session.close()
@@ -306,10 +354,28 @@ class TenderScraper:
         else:
             logical_start_url = self.list_url
         self.origin = url_origin(logical_start_url)
+        # Only the entry page's scheme/host/port may be crawled. Test doubles
+        # that do not accept the origin keyword still fall back safely.
+        try:
+            parameters = inspect.signature(self.fetcher.fetch).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        self._fetch_takes_origin = "origin" in parameters
+
+    def _fetch(self, logical_url: str) -> FetchedPage:
+        if self._fetch_takes_origin:
+            return self.fetcher.fetch(logical_url, origin=self.origin)
+        return self.fetcher.fetch(logical_url)
 
     def run(self) -> CheckResult:
         try:
-            pages, candidates, issues, duplicate_links = self._crawl_listing_pages()
+            (
+                pages,
+                candidates,
+                issues,
+                duplicate_links,
+                listing_incomplete,
+            ) = self._crawl_listing_pages()
             selected, selection_issues = self._select_candidates(candidates)
             issues.extend(selection_issues)
 
@@ -326,6 +392,7 @@ class TenderScraper:
                 pages=pages,
                 duplicates_skipped=duplicate_links + semantic_duplicates,
                 detail_count=detail_count,
+                listing_incomplete=listing_incomplete,
                 now=now,
             )
         finally:
@@ -334,17 +401,21 @@ class TenderScraper:
                 if close is not None:
                     close()
 
-    def _crawl_listing_pages(self) -> tuple[list[str], list[Candidate], list[str], int]:
+    def _crawl_listing_pages(
+        self,
+    ) -> tuple[list[str], list[Candidate], list[str], int, bool]:
         queue = [self.list_url]
         visited_pages: set[str] = set()
         pages: list[str] = []
         candidates_by_url: dict[str, Candidate] = {}
         issues: list[str] = []
         duplicate_links = 0
+        listing_incomplete = False
 
         while queue:
             if len(pages) >= self.max_pages:
-                issues.append(f"分页数量超过上限 {self.max_pages}，未继续抓取")
+                issues.append(f"分页数量超过上限 {self.max_pages}，未继续抓取，列表不完整")
+                listing_incomplete = True
                 break
             page_url = queue.pop(0)
             page_key = canonical_url(page_url)
@@ -353,14 +424,27 @@ class TenderScraper:
             visited_pages.add(page_key)
 
             try:
-                page = self.fetcher.fetch(page_url)
+                page = self._fetch(page_url)
+            except BlockedRedirectError as exc:
+                if not pages:
+                    raise ListFetchError(
+                        f"公告列表入口发生跨站跳转，已阻止：{exc.target_url}"
+                    ) from exc
+                issues.append(
+                    f"分页跳转被阻止，列表不完整：{page_url}"
+                    f"（跳转目标 {exc.target_url} 不在同站）"
+                )
+                listing_incomplete = True
+                continue
             except FetchError as exc:
                 if not pages:
                     raise ListFetchError(f"无法抓取公告列表页：{exc}") from exc
-                issues.append(f"分页抓取失败：{page_url}（{exc}）")
+                issues.append(f"分页抓取失败，列表不完整：{page_url}（{exc}）")
+                listing_incomplete = True
                 continue
 
             page_url = page.url
+            visited_pages.add(canonical_url(page_url))
             pages.append(page_url)
             page_candidates, page_links, page_duplicates = self._parse_listing_page(page)
             duplicate_links += page_duplicates
@@ -377,7 +461,13 @@ class TenderScraper:
                 if canonical_url(link) not in visited_pages and link not in queue:
                     queue.append(link)
 
-        return pages, list(candidates_by_url.values()), issues, duplicate_links
+        return (
+            pages,
+            list(candidates_by_url.values()),
+            issues,
+            duplicate_links,
+            listing_incomplete,
+        )
 
     def _parse_listing_page(self, page: FetchedPage) -> tuple[list[Candidate], list[str], int]:
         soup = page.soup
@@ -629,7 +719,34 @@ class TenderScraper:
         for candidate in candidates:
             detail_count += 1
             try:
-                page = self.fetcher.fetch(candidate.url)
+                page = self._fetch(candidate.url)
+            except BlockedRedirectError as exc:
+                if candidate.related:
+                    title = candidate.title
+                    kind = detect_kind(title, candidate.context)
+                    announcements.append(
+                        Announcement(
+                            url=candidate.url,
+                            title=title,
+                            kind=kind,
+                            publish_time=candidate.list_time,
+                            project_no=self.project_no,
+                            found_on=candidate.found_on,
+                            fetch_ok=False,
+                            blocked_redirect=True,
+                            error=(
+                                f"跨站跳转已阻止，未读取目标页"
+                                f"（{exc.target_url}），需人工核实"
+                            ),
+                            source_note="详情页跳转被阻止，标题/时间来自列表页，保留原链接",
+                        )
+                    )
+                elif candidate.fallback:
+                    issues.append(
+                        f"候选详情页跨站跳转被阻止，且列表页未标明项目编号，无法排除相关性："
+                        f"{candidate.url}（{exc.target_url}）"
+                    )
+                continue
             except FetchError as exc:
                 if candidate.related:
                     title = candidate.title

@@ -136,6 +136,14 @@ main { padding: 0 0 56px; }
 .section-heading .eyebrow,
 .rules .eyebrow { color: var(--blue); }
 
+.heading-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: none;
+}
+
 .sample-site-link {
   flex: none;
   padding: 9px 14px;
@@ -334,6 +342,8 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr.kind-cancellation { background: #fff7f7; }
 tbody tr.ignored { color: #64748b; background: #f8fafc; }
 tbody tr.fetch-failed { background: #fffbeb; }
+tbody tr.redirect-blocked { background: #fff7ed; }
+.alert-lead { margin-bottom: 10px !important; font-weight: 700; }
 
 .time-cell { white-space: nowrap; font-weight: 800; }
 .notice-title { max-width: 430px; font-weight: 800; }
